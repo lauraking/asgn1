@@ -65,7 +65,7 @@ asgn1_dev asgn1_device;
 int asgn1_major = 0;                      /* major number of module */  
 int asgn1_minor = 0;                      /* minor number of module */
 int asgn1_dev_count = 1;                  /* number of devices */
-
+struct proc_dir_entry *proc_entry;	  /* initial proc entry */
 
 /**
  * This function frees all memory pages held by the module.
@@ -84,6 +84,15 @@ void free_memory_pages(void) {
    * }
    * reset device data size, and num_pages
    */  
+	/*
+	if (asgn1_dev < 0 ) {
+
+	} 
+	while (asgn1_dev->num_pages > 0) {
+
+	}
+	*/
+	
 
 }
 
@@ -101,7 +110,22 @@ int asgn1_open(struct inode *inode, struct file *filp) {
    *
    */
 
+	/* TODO how to open virtual disk ? */
+	/* TODO what about inode? not used in this function */
 
+	atomic_inc(&asgn1_device.nprocs); 
+
+	if (atomic_read(&asgn1_device.nprocs) > atomic_read(&asgn1_device.max_nprocs)) {
+
+		return -EBUSY; 
+
+	}	 
+
+	if ((filp->f_flags) == O_WRONLY) {
+
+		free_memory_pages();
+
+	}
   return 0; /* success */
 }
 
@@ -115,6 +139,9 @@ int asgn1_release (struct inode *inode, struct file *filp) {
   /**
    * decrement process count
    */
+
+	atomic_dec(&asgn1_device.nprocs);
+
   return 0;
 }
 
@@ -298,6 +325,7 @@ struct file_operations asgn1_fops = {
  */
 int __init asgn1_init_module(void){
   int result; 
+  int reg_result;
 
   /* COMPLETE ME */
   /**
@@ -309,7 +337,43 @@ int __init asgn1_init_module(void){
    * initialize the page list
    * create proc entries
    */
+
+	
+	/* TODO should we set result to something?? */
+	/* TODO should set reg_result */
+  atomic_set(&asgn1_device.nprocs, 0);
+  atomic_set(&asgn1_device.max_nprocs,255);	/* TODO figure out max_nprocs */
+  
+  reg_result = register_chrdev_region (asgn1_device.dev, asgn1_dev_count,MYDEV_NAME);
+  if (reg_result != 0) {
+	printk(KERN_WARNING "error in register chrdev");
+	/* reg_result = TODO set result */
+	goto fail_device;
+  } 
+
+  asgn1_device.cdev = cdev_alloc();
+  cdev_init(asgn1_device.cdev, &asgn1_fops);	 
+  
+  cdev_add(asgn1_device.cdev, asgn1_device.dev, asgn1_dev_count);
  
+  INIT_LIST_HEAD(&asgn1_device.mem_list);	 
+ 
+  /*TODO FIGURE OUT IF NECESSARY */
+  proc_entry = create_proc_entry("driver/proc_entry", S_IRUGO | S_IWUSR, NULL);
+  
+ // proc_entry = proc_create("driver/proc_entry", S_IRUGO | S_IWUSR, NULL, asgn1_fops);
+  
+  
+  if (!proc_entry) {	
+
+	printk(KERN_INFO "I failed to make driver/proc__entry\n");
+	goto fail_device;
+
+  }  
+
+  /* TODO what to do with f_ops proc_entry-> */
+  printk(KERN_INFO "I created driver/proc_entry\n");
+
   asgn1_device.class = class_create(THIS_MODULE, MYDEV_NAME);
   if (IS_ERR(asgn1_device.class)) {
   }
@@ -333,6 +397,25 @@ fail_device:
   /* COMPLETE ME */
   /* PLEASE PUT YOUR CLEANUP CODE HERE, IN REVERSE ORDER OF ALLOCATION */
 
+  if (proc_entry) {
+	remove_proc_entry("driver/proc_entry/",NULL);
+  }
+
+  /*TODO how to eliminate list_head */
+
+	/*TODO check order of steps below */
+
+	/* free cdev */
+	kfree(asgn1_device.cdev);
+
+	/* delete the cdev */
+	cdev_del(asgn1_device.cdev);
+	
+	/* unregister device */
+	unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
+
+ 
+  
   return result;
 }
 
@@ -350,7 +433,27 @@ void __exit asgn1_exit_module(void){
    * free all pages in the page list 
    * cleanup in reverse order
    */
-  printk(KERN_WARNING "Good bye from %s\n", MYDEV_NAME);
+  
+	/* TODO what is different from cleanup above ? */
+	free_memory_pages();
+
+	/*TODO could be multiple processes */	
+	if (proc_entry) {
+		remove_proc_entry("driver/proc_entry/",NULL);
+	} 
+
+	/* TODO go through list_head and deallocate!! */
+
+  /* free cdev */
+	kfree(asgn1_device.cdev);
+	
+	/*delete the cdev */
+	cdev_del(asgn1_device.cdev);
+
+	/*unregister the device */
+	unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
+
+	printk(KERN_WARNING "Good bye from %s\n", MYDEV_NAME);
 }
 
 
