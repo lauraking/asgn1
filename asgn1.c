@@ -230,7 +230,14 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 
-  /* COMPLETE ME */
+	int end_page_no;				/* the highest page number to write this function call */
+
+	page_node *ce;					/* to iteratively create page nodes */
+
+	size_t cp_ret;						/* copy_from_user result */
+  
+	
+	/* COMPLETE ME */
   /**
    * Traverse the list until the first page reached, and add nodes if necessary
    *
@@ -239,6 +246,92 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
    *   a while loop / do-while loop is recommended to handle this situation. 
    */
 
+	/* check the max number of pages to be written against the device size */
+
+	end_page_no = (*f_pos + count) / PAGE_SIZE;
+
+	while(asgn1_device.num_pages < end_page_no) {
+		ce = kmalloc(sizeof(page_node), GFP_KERNEL);
+		//ce->page=virt_to(__get_free_page(GFP_KERNEL);
+		ce->page = alloc_pages(GFP_KERNEL,0);
+		list_add(&(ce->list),&(asgn1_device.mem_list));
+		asgn1_device.num_pages++;
+	}
+
+	/* TODO when to update the value of num_pages? after function */
+
+	if (end_page_no > asgn1_device.num_pages) {
+		asgn1_device.num_pages = end_page_no;
+	}
+
+	list_for_each(ptr, &asgn1_device.mem_list) {
+		
+		curr = list_entry(ptr, page_node, list);
+		if (curr_page_no == begin_page_no) {
+			break;
+		}
+		curr_page_no++;
+	}
+
+	/* TODO should i check to see if page correctly allocated? */
+	//if (!curr->page) {
+	//	curr->page = __get_free_page(GFP_KERNEL);
+	//}
+
+	begin_offset = *f_pos % PAGE_SIZE;
+
+	while (size_written < count) {
+		
+		size_to_be_written = PAGE_SIZE - begin_offset;
+		
+		if((count - size_written) > size_to_be_written) {
+			size_to_be_written = count - size_written;
+		} 
+
+	/* TODO PAGE->INODE YAY LOOK UP FOR WHERE TO WRITE */
+	/* TODO where exactly am i writing this to? */
+		cp_ret = copy_from_user(&curr->page[begin_offset], 
+														&buf[size_written], 
+														size_to_be_written);
+
+		if (cp_ret == size_to_be_written) {
+			return -EFAULT;
+		}
+
+		if (cp_ret > 0) {
+			size_written += cp_ret;
+			/* TODO where exactly is beginning of page ? or file */
+			f_pos += size_written;
+			if (asgn1_device.data_size < *f_pos) {
+				asgn1_device.data_size = *f_pos;
+			}
+			return size_written;
+
+		}
+
+		/* update the current_size_written after write */
+		size_written += size_to_be_written;
+		// after first through of loop set begin_offset to 0			
+		begin_offset = 0;
+
+		/* move pointer to next in mem_list*/
+		ptr = ptr->next;
+
+		/* retrieve the next page address and set to current page */
+		curr = list_entry(ptr, page_node, list);
+
+		/* TODO update page count */ 
+		curr_page_no ++; 
+
+	}
+	
+	/*TODO how to update f_pos and when to use *f_pos */
+	*f_pos += size_written;
+	
+	if (asgn1_device.data_size < *f_pos) {
+		asgn1_device.data_size = *f_pos; 
+
+	}
 
   asgn1_device.data_size = max(asgn1_device.data_size,
                                orig_f_pos + size_written);
