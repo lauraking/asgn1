@@ -192,10 +192,14 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
    */
 
 	/* check f_pos if beyond data_size */
-	if (f_pos > asgn1_device.data_size) {
+
+	/*TODO while loop off count vs data_size */
+	if (*f_pos >= asgn1_device.data_size) {
 		printk(KERN_INFO " f_pos beyond data size -> ret 0\n");
 		return 0;
 	} 
+
+	printk(KERN_WARNING "data size %d pinter %u\n", asgn1_device.data_size, *f_pos);
 
 	list_for_each(ptr, &asgn1_device.mem_list) {
 		
@@ -210,7 +214,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 
 	begin_offset = *f_pos % PAGE_SIZE;
 
-	while (size_read < count) {
+	while (size_read < asgn1_device.data_size) {
 		size_to_be_read = min((PAGE_SIZE - begin_offset),(count-size_written));
 	
 		if (asgn1_device.data_size < (*f_pos + size_to_be_read)) {
@@ -218,7 +222,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 			end_of_ram = 1;
 		} 
 	
-		size_not_read = copy_to_user(&buf[size_read], 
+		size_not_read = copy_to_user(buf + size_read, 
 														page_address(curr->page) + begin_offset,
 														size_to_be_read);
 
@@ -238,6 +242,14 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		}
 	
 		size_read += size_to_be_read;
+	
+		if (size_not_written) {
+			break;
+		}
+
+		ptr = ptr->next;
+		curr = list_entry(ptr,page_node,list);
+		curr_page_node ++;
 		
 
 	} 
@@ -330,7 +342,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	end_page_no = (*f_pos + count) / PAGE_SIZE;
 
-	while(asgn1_device.num_pages < end_page_no) {
+	while(asgn1_device.num_pages <= end_page_no) {
 		ce = kmalloc(sizeof(page_node), GFP_KERNEL);
 		//ce->page=virt_to(__get_free_page(GFP_KERNEL);
 		ce->page = alloc_pages(GFP_KERNEL,0);
@@ -340,9 +352,15 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	/* TODO when to update the value of num_pages? after function */
 
+
+	asgn1_device.num_pages = min(end_page_no, asgn1_device.num_pages);
+
+	/*
 	if (end_page_no > asgn1_device.num_pages) {
 		asgn1_device.num_pages = end_page_no;
 	}
+
+	*/
 
 	list_for_each(ptr, &asgn1_device.mem_list) {
 		
@@ -360,7 +378,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	begin_offset = *f_pos % PAGE_SIZE;
 
-	while (size_written < count) {
+	while (size_written < asgn1_device.data_size) {
 		
 		
 		size_to_be_written = min((PAGE_SIZE - begin_offset),(count-size_written));
