@@ -161,8 +161,11 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   size_t size_to_be_read;   /* size to be read in the current round in 
 			       while loop */
 
+	size_t size_not_read		/*size not read returned from copy to user */
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
+	
+	int end_of_ram = 0;
 
   /* COMPLETE ME */
   /**
@@ -181,6 +184,76 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
    * if end of data area of ramdisk reached before copying the requested
    *   return the size copied to the user space so far
    */
+
+	/* check f_pos if beyond data_size */
+	if (f_pos > asgn1_device.data_size) {
+		printk(KERN_INFO " f_pos beyond data size -> ret 0\n");
+		return 0;
+	} 
+
+	list_for_each(ptr, &asgn1_device.mem_list) {
+		
+		curr = list_entry(ptr, page_node, list);
+		if (curr_page_no == begin_page_no) {
+			break;
+		}
+		curr_page_no++;
+	}
+
+	curr_size_read = 0;
+
+	begin_offset = *f_pos % PAGE_SIZE;
+
+	while (size_read < count) {
+		size_to_be_read = min((PAGE_SIZE - begin_offset),(count-size_written));
+	
+		if (asgn1_device.data_size < (*f_pos + size_to_be_read)) {
+			size_to_be_read = asgn1_device.data_size - *f_pos;
+			end_of_ram = 1;
+		} 
+	
+		size_not_read = copy_to_user(&buf[size_read], 
+														page_address(curr->page) + begin_offset,
+														size_to_be_read);
+
+		if (size_not_read == size_to_be_read) {
+			return -EFAULT;
+		}
+		
+		if (size_not_read > 0) {
+			size_read += (size_to_be_read - size_not_read);
+			f_pos = *f_pos + size_read;
+			return size_read;
+		}
+	
+		if (end_of_ram) {
+			size_read += size_to_be_read;
+			break;
+		}
+	
+		size_read += size_to_be_read;
+		
+
+	} 
+	
+	// after first through of loop set begin_offset to 0			
+		begin_offset = 0;
+
+		/* move pointer to next in mem_list*/
+		ptr = ptr->next;
+
+		/* retrieve the next page address and set to current page */
+		curr = list_entry(ptr, page_node, list);
+
+		/* TODO update page count */ 
+		curr_page_no ++; 
+
+	}
+	
+	/*TODO how to update f_pos and when to use *f_pos */
+	*f_pos += size_written;
+	
+	
 
   return size_read;
 }
@@ -254,7 +327,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 		ce = kmalloc(sizeof(page_node), GFP_KERNEL);
 		//ce->page=virt_to(__get_free_page(GFP_KERNEL);
 		ce->page = alloc_pages(GFP_KERNEL,0);
-		list_add(&(ce->list),&(asgn1_device.mem_list));
+		list_add_tail(&(ce->list),&(asgn1_device.mem_list));
 		asgn1_device.num_pages++;
 	}
 
@@ -282,16 +355,19 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	while (size_written < count) {
 		
-		size_to_be_written = PAGE_SIZE - begin_offset;
+		
+		size_to_be_written = min((PAGE_SIZE - begin_offset),(count-size_written));
+
+		/*size_to_be_written = PAGE_SIZE - begin_offset;
 		
 		if((count - size_written) > size_to_be_written) {
 			size_to_be_written = count - size_written;
-		} 
+		} */
 
 	/* TODO PAGE->INODE YAY LOOK UP FOR WHERE TO WRITE */
 	/* TODO where exactly am i writing this to? */
-		cp_ret = copy_from_user(&curr->page[begin_offset], 
-														&buf[size_written], 
+		cp_ret = copy_from_user(page_address(curr->page) + begin_offset, 
+														buf + size_written, 
 														size_to_be_written);
 
 		if (cp_ret == size_to_be_written) {
