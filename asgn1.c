@@ -19,6 +19,12 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+/* TODO think through updating f_pos pointer */
+/* TODO look through init setup from fb thread */
+/* TODO print statements to test */
+/* TODO test 	*/
+
+
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -254,6 +260,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 	*f_pos += size_written;
 	
 	
+	filp->f_pos = *f_pos;
 
   return size_read;
 }
