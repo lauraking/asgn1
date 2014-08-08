@@ -78,8 +78,10 @@ struct proc_dir_entry *proc_entry;	  /* initial proc entry */
  */
 void free_memory_pages(void) {
   page_node *curr;
+	struct list_head *tmp;
+	struct list_head *ptr = asgn1_device.mem_list.next;
 
-  /* COMPLETE ME */
+	/* COMPLETE ME */
   /**
    * Loop through the entire page list {
    *   if (node has a page) {
@@ -98,7 +100,28 @@ void free_memory_pages(void) {
 
 	}
 	*/
+
+	printk(KERN_INFO "WANT TO FREE %d PAGES FROM %s\n",
+														asgn1_device.num_pages,
+														MYDEV_NAME);
+	list_for_each_safe(ptr, tmp,  &asgn1_device.mem_list) {
 	
+		curr = list_entry(ptr, page_node, list);
+		if (!(curr->page == NULL)) {
+			/*TODO SHOULD BE & OR NOT */
+			__free_page(curr->page);
+			//free_pages(&(curr->page),0);
+		}
+		
+		list_del(&curr->list);
+		kfree(curr);		
+	
+	}	 
+		
+	asgn1_device.data_size = 0;
+	asgn1_device.num_pages = 0; 
+	printk(KERN_INFO "FREE PAGES SUCCESS \n");
+
 
 }
 
@@ -167,11 +190,13 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
   size_t size_to_be_read;   /* size to be read in the current round in 
 			       while loop */
 
-	size_t size_not_read		/*size not read returned from copy to user */
+	size_t size_not_read;		/*size not read returned from copy to user */
   struct list_head *ptr = asgn1_device.mem_list.next;
   page_node *curr;
 	
 	int end_of_ram = 0;
+
+	size_t adjust_data_size;
 
   /* COMPLETE ME */
   /**
@@ -195,11 +220,14 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 
 	/*TODO while loop off count vs data_size */
 	if (*f_pos >= asgn1_device.data_size) {
-		printk(KERN_INFO " f_pos beyond data size -> ret 0\n");
+		printk(KERN_INFO "BEGINING OF READ CHECK -> ret 0\n");
 		return 0;
 	} 
-
-	printk(KERN_WARNING "data size %d pinter %u\n", asgn1_device.data_size, *f_pos);
+	
+	printk(KERN_INFO "INITAL READ CONDITIONS\n");
+	printk(KERN_INFO "read data_size= %d\n", asgn1_device.data_size);
+	printk(KERN_INFO "read f_pos = %u\n", *f_pos);
+	//printk(KERN_INFO "READ F_POS = %d\n",f_pos);
 
 	list_for_each(ptr, &asgn1_device.mem_list) {
 		
@@ -210,49 +238,70 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		curr_page_no++;
 	}
 
-	curr_size_read = 0;
-
 	begin_offset = *f_pos % PAGE_SIZE;
 
-	while (size_read < asgn1_device.data_size) {
-		size_to_be_read = min((PAGE_SIZE - begin_offset),(count-size_written));
+	adjust_data_size = asgn1_device.data_size - begin_offset;
+
+	/*TODO how to know if read is done when to return 0 */
+	/*TODO comment below V do i adjust this max for count - begin offset */
+	adjust_data_size = min((count - begin_offset),adjust_data_size);
+
+	//while (size_read < adjust_data_size) {
+
+	
+	while (size_read < adjust_data_size) {	
+		//curr_size_read = 0
+		
+		size_to_be_read = min((PAGE_SIZE - begin_offset),(count-size_read));
 	
 		if (asgn1_device.data_size < (*f_pos + size_to_be_read)) {
 			size_to_be_read = asgn1_device.data_size - *f_pos;
 			end_of_ram = 1;
+			printk(KERN_INFO "WARNING END OF RAM -> STBR shrink\n");
 		} 
 	
+		printk(KERN_INFO "USER WANTS TO READ %d bytes\n",size_to_be_read);
+		printk(KERN_INFO "ON PAGE %d\n", curr_page_no);
+
 		size_not_read = copy_to_user(buf + size_read, 
 														page_address(curr->page) + begin_offset,
 														size_to_be_read);
 
+		curr_size_read = size_to_be_read - size_not_read;
+	
+		printk(KERN_INFO "USER READ %d bytes\n",curr_size_read);
+
+		*f_pos += curr_size_read;
+		size_read += curr_size_read;
+		printk(KERN_INFO "TOTAL SIZE READ = %d \n",size_read);
+
+		if (size_read == adjust_data_size){
+			printk(KERN_INFO "SIZE_READ == ADJUST_DATA_SIZE\n");
+			printk(KERN_INFO "RETURN 0 TO USER\n");
+			return 0;
+
+		} 
+
+
 		if (size_not_read == size_to_be_read) {
+			printk(KERN_INFO "COPY TO USER COPIED NOTHING -> RET -EFAULT\n");
 			return -EFAULT;
 		}
 		
 		if (size_not_read > 0) {
-			size_read += (size_to_be_read - size_not_read);
-			f_pos = *f_pos + size_read;
-			return size_read;
+			printk(KERN_INFO "SIZE_NOT READ = %d\n",size_not_read);
+			printk(KERN_INFO "SIZE_NOT_READ > 0 -> break while loop\n");
+			break;
 		}
 	
+		/*TODO what about case where end of ram but didn't read all? */
 		if (end_of_ram) {
-			size_read += size_to_be_read;
+			printk(KERN_INFO "END OF RAM -> EXIT WHILE LOOP\n");
 			break;
 		}
-	
-		size_read += size_to_be_read;
-	
-		if (size_not_written) {
-			break;
-		}
-
-		ptr = ptr->next;
-		curr = list_entry(ptr,page_node,list);
-		curr_page_node ++;
 		
 
-	} 
+ 
 	
 	// after first through of loop set begin_offset to 0			
 		begin_offset = 0;
@@ -269,11 +318,13 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 	}
 	
 	/*TODO how to update f_pos and when to use *f_pos */
-	*f_pos += size_written;
+	//*f_pos += size_written;
 	
 	
-	filp->f_pos = *f_pos;
+	//filp->f_pos = *f_pos;
 
+	printk(KERN_INFO "OUT OF READ WHILE LOOP\n");
+	printk(KERN_INFO "RETURN SIZE_READ: %d TO USER\n",size_read);
   return size_read;
 }
 
@@ -283,8 +334,10 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
 {
     loff_t testpos;
-
+		
     size_t buffer_size = asgn1_device.num_pages * PAGE_SIZE;
+		
+		printk(KERN_INFO "ENTER LSEEK\n");
 
     /* COMPLETE ME */
     /**
@@ -296,7 +349,40 @@ static loff_t asgn1_lseek (struct file *file, loff_t offset, int cmd)
      *
      * set file->f_pos to testpos
      */
+
+		if (cmd == SEEK_SET) {
+				/* setting position relative to the beginning of the file */
+				testpos = offset;
+		
+		} else if (cmd == SEEK_CUR) {
+				/* setting position relative to the current position */
+				testpos = file->f_pos + offset;
+		
+		} else if (cmd == SEEK_END) {
+				/* setting position relative to the end of the file */
+				testpos = asgn1_device.data_size + offset;
+		
+		} else {
+				/* INVALID CMD -> EXIT */
+				/* CMD != SEEK_SET, SEEK_CUR, SEEK_END */
+				return -EINVAL; 
+
+		}
+
+		if (testpos > asgn1_device.data_size || testpos < 0) {
+			/*invalid proposition */
+			/* return error */
+			printk(KERN_INFO "invalid lseek: testpos = %ld\n",(long) testpos);
+			printk(KERN_INFO "return -EINVAL\n");
+			return -EINVAL;
+
+		}
+		
+		/* new value passed so set new file position */
+		file->f_pos = testpos;
+		
     printk (KERN_INFO "Seeking to pos=%ld\n", (long)testpos);
+		printk (KERN_INFO "EXIT LSEEK\n");
     return testpos;
 }
 
@@ -326,7 +412,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	page_node *ce;					/* to iteratively create page nodes */
 
-	size_t cp_ret;						/* copy_from_user result */
+	size_t size_not_written;						/* copy_from_user result */
   
 	
 	/* COMPLETE ME */
@@ -340,9 +426,14 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	/* check the max number of pages to be written against the device size */
 
+	if (*f_pos >= asgn1_device.data_size) {
+		return 0;
+	}
+
 	end_page_no = (*f_pos + count) / PAGE_SIZE;
 
-	while(asgn1_device.num_pages <= end_page_no) {
+	/*TODO should be less than or equal to */
+	while(asgn1_device.num_pages < end_page_no) {
 		ce = kmalloc(sizeof(page_node), GFP_KERNEL);
 		//ce->page=virt_to(__get_free_page(GFP_KERNEL);
 		ce->page = alloc_pages(GFP_KERNEL,0);
@@ -353,7 +444,10 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 	/* TODO when to update the value of num_pages? after function */
 
 
-	asgn1_device.num_pages = min(end_page_no, asgn1_device.num_pages);
+	asgn1_device.num_pages = max(end_page_no, asgn1_device.num_pages);
+
+	/* TODO when to check whether max num pages is greater than device size */
+	/* TODO could be check before and what to return */
 
 	/*
 	if (end_page_no > asgn1_device.num_pages) {
@@ -378,7 +472,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	begin_offset = *f_pos % PAGE_SIZE;
 
-	while (size_written < asgn1_device.data_size) {
+	while (size_written < count) {
 		
 		
 		size_to_be_written = min((PAGE_SIZE - begin_offset),(count-size_written));
@@ -391,27 +485,38 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	/* TODO PAGE->INODE YAY LOOK UP FOR WHERE TO WRITE */
 	/* TODO where exactly am i writing this to? */
-		cp_ret = copy_from_user(page_address(curr->page) + begin_offset, 
+		size_not_written = copy_from_user(
+														page_address(curr->page) + begin_offset, 
 														buf + size_written, 
 														size_to_be_written);
 
-		if (cp_ret == size_to_be_written) {
+		
+		curr_size_written = size_to_be_written - size_not_written;
+		if (size_to_be_written == size_not_written) {
+			printk(KERN_INFO "curr_size_written is 0 return \n");
 			return -EFAULT;
 		}
 
-		if (cp_ret > 0) {
-			size_written += cp_ret;
-			/* TODO where exactly is beginning of page ? or file */
-			f_pos += size_written;
-			if (asgn1_device.data_size < *f_pos) {
+		/* update the current_size_written after write */
+		size_written += curr_size_written;
+
+		/* update file position */
+		*f_pos += curr_size_written;		/*TODO where to check data size done above??*/
+
+
+		if (size_not_written > 0) {
+		   
+			/*if (asgn1_device.data_size < *f_pos) {
 				asgn1_device.data_size = *f_pos;
 			}
 			return size_written;
+			*/
 
+			/*TODO figure out why this gives error when uncomment */
+			//printk(KERN_INF0 "size_not written = %d bytes\n", size_not_written);
+			break;
 		}
 
-		/* update the current_size_written after write */
-		size_written += size_to_be_written;
 		// after first through of loop set begin_offset to 0			
 		begin_offset = 0;
 
@@ -427,12 +532,15 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 	}
 	
 	/*TODO how to update f_pos and when to use *f_pos */
-	*f_pos += size_written;
+	//*f_pos += size_written;
+
+
 	
-	if (asgn1_device.data_size < *f_pos) {
+	/*if (asgn1_device.data_size < *f_pos) {
 		asgn1_device.data_size = *f_pos; 
 
 	}
+	*/
 
   asgn1_device.data_size = max(asgn1_device.data_size,
                                orig_f_pos + size_written);
@@ -458,6 +566,7 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
      set max_nprocs accordingly, don't forget to check validity of the 
      value before setting max_nprocs
    */
+	
 
   return -ENOTTY;
 }
@@ -520,6 +629,7 @@ struct file_operations asgn1_fops = {
 int __init asgn1_init_module(void){
   int result; 
   int reg_result;
+	int add_result;
 
   /* COMPLETE ME */
   /**
@@ -538,21 +648,42 @@ int __init asgn1_init_module(void){
   atomic_set(&asgn1_device.nprocs, 0);
   atomic_set(&asgn1_device.max_nprocs,255);	/* TODO figure out max_nprocs */
   
-  reg_result = register_chrdev_region (asgn1_device.dev, asgn1_dev_count,MYDEV_NAME);
-  if (reg_result != 0) {
-	printk(KERN_WARNING "error in register chrdev");
-	/* reg_result = TODO set result */
-	goto fail_device;
+	 reg_result = alloc_chrdev_region (
+						&asgn1_device.dev,
+						asgn1_minor, 
+						asgn1_dev_count,
+						MYDEV_NAME);
+  
+	if (reg_result < 0) {
+		printk(KERN_WARNING "error in register chrdev");
+		/* reg_result = TODO set result */
+		goto fail_device;
   } 
 
-  asgn1_device.cdev = cdev_alloc();
-  cdev_init(asgn1_device.cdev, &asgn1_fops);	 
+	/*set up major number */
+	asgn1_major = MAJOR(asgn1_device.dev);
+
+	/*allocate cdev region */
+	asgn1_device.cdev = cdev_alloc();
+	asgn1_device.cdev->ops = &asgn1_fops;
+	asgn1_device.cdev->owner = THIS_MODULE;
+  //asgn1_device.cdev = cdev_alloc()
+
   
-  cdev_add(asgn1_device.cdev, asgn1_device.dev, asgn1_dev_count);
+	//cdev_init(asgn1_device.cdev, &asgn1_fops);	 
+  
+  add_result = cdev_add(asgn1_device.cdev, asgn1_device.dev, asgn1_dev_count);
  
+	/*check that the cdev added successfully */
+	if (add_result<0) {
+		printk(KERN_INFO "Unable to add cdev");
+		return add_result;
+	} 
+
   INIT_LIST_HEAD(&asgn1_device.mem_list);	 
  
   /*TODO FIGURE OUT IF NECESSARY */
+	/*
   proc_entry = create_proc_entry("driver/proc_entry", S_IRUGO | S_IWUSR, NULL);
   
  // proc_entry = proc_create("driver/proc_entry", S_IRUGO | S_IWUSR, NULL, asgn1_fops);
@@ -565,8 +696,12 @@ int __init asgn1_init_module(void){
 
   }  
 
+	*/
   /* TODO what to do with f_ops proc_entry-> */
-  printk(KERN_INFO "I created driver/proc_entry\n");
+  /*
+	printk(KERN_INFO "I created driver/proc_entry\n");
+
+	*/
 
   asgn1_device.class = class_create(THIS_MODULE, MYDEV_NAME);
   if (IS_ERR(asgn1_device.class)) {
@@ -590,10 +725,13 @@ fail_device:
 
   /* COMPLETE ME */
   /* PLEASE PUT YOUR CLEANUP CODE HERE, IN REVERSE ORDER OF ALLOCATION */
-
+	
+	/*
   if (proc_entry) {
 	remove_proc_entry("driver/proc_entry/",NULL);
   }
+
+	*/
 
   /*TODO how to eliminate list_head */
 
@@ -632,9 +770,13 @@ void __exit asgn1_exit_module(void){
 	free_memory_pages();
 
 	/*TODO could be multiple processes */	
+
+	/*
 	if (proc_entry) {
 		remove_proc_entry("driver/proc_entry/",NULL);
 	} 
+
+	*/
 
 	/* TODO go through list_head and deallocate!! */
 
