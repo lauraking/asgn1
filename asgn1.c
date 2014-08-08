@@ -426,11 +426,19 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	/* check the max number of pages to be written against the device size */
 
-	if (*f_pos >= asgn1_device.data_size) {
+ /* TODO  FIGURE OUT ENDING CONDITION / BEGINNING CONDITION OF WHILE 
+	*/
+	if (*f_pos >= asgn1_device.data_size 
+			&& (asgn1_device.data_size != 0)) {
 		return 0;
-	}
+	} 
+
 
 	end_page_no = (*f_pos + count) / PAGE_SIZE;
+
+	if (end_page_no > 16) {
+		return -EINVAL;
+	}
 
 	/*TODO should be less than or equal to */
 	while(asgn1_device.num_pages < end_page_no) {
@@ -682,6 +690,7 @@ int __init asgn1_init_module(void){
 
   INIT_LIST_HEAD(&asgn1_device.mem_list);	 
  
+
   /*TODO FIGURE OUT IF NECESSARY */
 	/*
   proc_entry = create_proc_entry("driver/proc_entry", S_IRUGO | S_IWUSR, NULL);
@@ -714,6 +723,9 @@ int __init asgn1_init_module(void){
     result = -ENOMEM;
     goto fail_device;
   }
+
+	/*TODO when to set to zero ? */
+	asgn1_device.data_size = 0;
   
   printk(KERN_WARNING "set up udev entry\n");
   printk(KERN_WARNING "Hello world from %s\n", MYDEV_NAME);
@@ -791,9 +803,4 @@ void __exit asgn1_exit_module(void){
 
 	printk(KERN_WARNING "Good bye from %s\n", MYDEV_NAME);
 }
-
-
-module_init(asgn1_init_module);
-module_exit(asgn1_exit_module);
-
 
