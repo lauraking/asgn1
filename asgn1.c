@@ -79,8 +79,8 @@ struct proc_dir_entry *proc_entry;	  /* initial proc entry */
 void free_memory_pages(void) {
   page_node *curr;
 	struct list_head *tmp;
-	struct list_head *ptr = asgn1_device.mem_list.next;
-
+	/*struct list_head *ptr = asgn1_device.mem_list.next; */
+	struct list_head *ptr;
 	/* COMPLETE ME */
   /**
    * Loop through the entire page list {
@@ -107,7 +107,7 @@ void free_memory_pages(void) {
 	list_for_each_safe(ptr, tmp,  &asgn1_device.mem_list) {
 	
 		curr = list_entry(ptr, page_node, list);
-		if (!(curr->page == NULL)) {
+		if (curr->page) {
 			/*TODO SHOULD BE & OR NOT */
 			__free_page(curr->page);
 			//free_pages(&(curr->page),0);
@@ -256,6 +256,17 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 	
 	//while (size_read < adjust_data_size) {
 
+	/* check that count is not beyond the data size */
+	if (*f_pos + count > asgn1_device.data_size) {
+		/* *f_pos + count is greater than data size */
+
+		printk(KERN_WARNING "*F_POS + COUNT GREATER THAN DATA SIZE\n");
+		printk(KERN_WARNING "COUNT SHRUNK FROM %d TO ",count);
+		count = asgn1_device.data_size - *f_pos;
+		printk(KERN_WARNING "%d\n",count);
+		
+	}
+
 	printk(KERN_WARNING "\nENTER READ WHILE LOOP!!\n");
 	
 	while (size_read < adjust_data_size) {	
@@ -267,13 +278,14 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		size_to_be_read = min((PAGE_SIZE - begin_offset),(count-size_read));
 		printk(KERN_WARNING "WANT TO READ = %d\n", size_to_be_read);
 	
-		if (asgn1_device.data_size < (*f_pos + size_to_be_read)) {
+		/*if (asgn1_device.data_size < (*f_pos + size_to_be_read)) {
 			size_to_be_read = asgn1_device.data_size - *f_pos;
 			end_of_ram = 1;
 			printk(KERN_WARNING "WARNING END OF RAM -> STBR shrink\n");
-		} 
+		}
 	
 		printk(KERN_WARNING "USER NOW  WANTS TO READ %d bytes\n",size_to_be_read);
+		*/
 		printk(KERN_WARNING "ON PAGE %d\n", curr_page_no);
 
 		size_not_read = copy_to_user(buf + size_read, 
@@ -573,6 +585,9 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 			printk(KERN_WARNING "MOVE F_POS FROM %u to\n",*f_pos);
 		}
 		*f_pos += curr_size_written;		/*TODO where to check data size done above??*/
+		/*filp->f_pos += curr_size_written;	*/
+		/*TODO how to make so you can write to the end of the file?? */	
+	
 		if (printk_ratelimit()){
 			printk(KERN_WARNING "UPDATE F POS: %u\n",*f_pos);
 		}
@@ -689,7 +704,26 @@ static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
      *   reached, add each page with remap_pfn_range one by one
      *   up to the last requested page
      */
-    return 0;
+/*
+		printk(KERN_WARNING "ENTERED MMAP FUNCTION\n");
+
+		list_for_each(ptr, &asgn1_device.mem_list) {
+		
+			curr = list_entry(ptr, page_node, list);
+			if (curr_page_no == begin_page_no) {
+				printk(KERN_WARNING "FOUND PAGE %d \n",curr_page_no);
+			break;
+		} 
+		printk(KERN_WARNING "C_PG: %d != B_PG: %d\n",curr_page_no,begin_page_no);
+		curr_page_no++;
+	}
+		if (remap_pfn_range (vma, vma-> vm_start, 
+													vma->vm_pgoff,
+													vma
+
+		printk(KERN_WARNING "EXITING MMAP FUNCTION SUCCESS\n");
+	*/  
+  return 0;
 }
 
 
@@ -866,12 +900,12 @@ void __exit asgn1_exit_module(void){
 
 	/* TODO go through list_head and deallocate!! */
 
-	
+	/* free cdev */
+	/*kfree(asgn1_device.cdev);*/
+
 	/*delete the cdev */
 	cdev_del(asgn1_device.cdev);
   
-	/* free cdev */
-	kfree(asgn1_device.cdev);
 
 	/*unregister the device */
 	unregister_chrdev_region(asgn1_device.dev, asgn1_dev_count);
