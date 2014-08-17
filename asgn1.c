@@ -150,10 +150,14 @@ int asgn1_open(struct inode *inode, struct file *filp) {
 
 	}	 
 
-	if ((filp->f_flags) == O_WRONLY) {
+	/* check the APPEND flag and reset to file positin to EOF */
+	if (filp->f_flags & O_APPEND) {
+		filp->f_pos = asgn1_device.data_size;
+	} 
 
+	/* if the file is written is WRONLY then free memory pages */
+	else if (filp->f_flags & O_WRONLY) {
 		free_memory_pages();
-
 	}
   return 0; /* success */
 }
@@ -473,7 +477,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 	printk(KERN_WARNING "DEVICE PAGES = %d\n",asgn1_device.num_pages);
 	
 	/*TODO should be less than or equal to */
-	while(asgn1_device.num_pages <= end_page_no) {
+	while(asgn1_device.num_pages < end_page_no || asgn1_device.num_pages == 0) {
 		ce = kmalloc(sizeof(page_node), GFP_KERNEL);
 		/* check for null pointer */
 		if (!(ce)) {
@@ -663,7 +667,50 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
      set max_nprocs accordingly, don't forget to check validity of the 
      value before setting max_nprocs
    */
+	/*TODO how the fuck to check if it is for the device */
+	if (_IOC_TYPE(cmd) != MYIOC_TYPE) {
+		return -EINVAL;
+	}	
+
 	
+	printk(KERN_WARNING "IN IOCTL \n");
+	/* get sequential number of the command with the device */
+	nr = _IOC_NR(cmd);
+	printk(KERN_WARNING "NR = %d\n",nr);
+	printk(KERN_WARNING "SET_NPROC_OP value = %d\n",SET_NPROC_OP);
+	printk(KERN_WARNING "CMD = %u\n",cmd); 
+	printk(KERN_WARNING "_IOC_TYPE = %d\n",_IOC_TYPE(cmd));
+	printk(KERN_WARNING "major number %d\n",MAJOR(asgn1_device.dev));
+	printk(KERN_WARNING "MINOR NUMBER %d\n",MINOR(asgn1_device.dev));
+	/*TODO is it supposed to switch on nr or cmd?*/
+	switch (nr) {
+
+		case SET_NPROC_OP:
+			/*TODO how to check if NULL */
+			//if (arg < 0) {
+			//	printk(KERN_WARNING "INVALID NPROC ARG -> RETURN ERROR\n");
+			//}
+			//new_procs = copy_from_user(
+			printk(KERN_WARNING "CMD = SET_NPROC_OP\n"); 
+
+			result = copy_from_user((int*) &new_nprocs, arg, sizeof(int));
+			printk(KERN_WARNING "RESULT = %d\n",result);
+			printk(KERN_WARNING "new_nprocs = %d\n",new_nprocs);
+			if (new_nprocs < 0) {
+					printk(KERN_WARNING "%d new_nprocs INVALID -> return error\n",new_nprocs);
+					return -EINVAL;
+			}
+			
+  		atomic_set(&asgn1_device.max_nprocs,new_nprocs);	/* TODO figure out max_nprocs */
+			printk(KERN_WARNING "NEW MAX_NPROCS: %d\n",atomic_read(&asgn1_device.max_nprocs));
+			/*TODO should i actually check if atomic set failed?? */
+
+			return 0;
+
+		default:
+			printk(KERN_WARNING "cmd did not match any of cases -> return error\n");
+			return -EINVAL;
+	}
 
   return -ENOTTY;
 }
@@ -704,25 +751,38 @@ static int asgn1_mmap (struct file *filp, struct vm_area_struct *vma)
      *   reached, add each page with remap_pfn_range one by one
      *   up to the last requested page
      */
-/*
+
 		printk(KERN_WARNING "ENTERED MMAP FUNCTION\n");
 
-		list_for_each(ptr, &asgn1_device.mem_list) {
-		
-			curr = list_entry(ptr, page_node, list);
-			if (curr_page_no == begin_page_no) {
-				printk(KERN_WARNING "FOUND PAGE %d \n",curr_page_no);
-			break;
-		} 
-		printk(KERN_WARNING "C_PG: %d != B_PG: %d\n",curr_page_no,begin_page_no);
-		curr_page_no++;
-	}
-		if (remap_pfn_range (vma, vma-> vm_start, 
-													vma->vm_pgoff,
-													vma
+		/* checks before mmap execution */
 
+		if (ramdisk_size > vma->vm_end) {
+			/*TODO what error to throw */
+			return -EINVAL;
+		}
+
+		/* mapping loop */
+		list_for_each_entry(curr, &asgn1_device.mem_list, list) {
+			if (index >= offset) {
+				pfn = page_to_pfn(curr->page);
+				printk(KERN_WARNING "PFN = %ld\n",pfn);
+				if (remap_pfn_range (vma,
+														vma->vm_start + PAGE_SIZE * (index - offset),
+														pfn,
+														PAGE_SIZE,
+														vma->vm_page_prot)) {
+					return -EAGAIN;
+	
+				}	 
+				printk(KERN_WARNING "remap success for index: %ld \n", index);
+				
+			}
+		
+			index++;
+		} 
+		
 		printk(KERN_WARNING "EXITING MMAP FUNCTION SUCCESS\n");
-	*/  
+	  
   return 0;
 }
 
