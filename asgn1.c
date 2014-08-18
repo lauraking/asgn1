@@ -156,7 +156,7 @@ int asgn1_open(struct inode *inode, struct file *filp) {
 	} 
 
 	/* if the file is written is WRONLY then free memory pages */
-	else if (filp->f_flags & O_WRONLY) {
+	else if ((filp->f_flags & O_WRONLY) && (filp->f_flags & O_TRUNC)) {
 		free_memory_pages();
 	}
   return 0; /* success */
@@ -254,7 +254,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 	printk(KERN_WARNING "ADJUSTED D SIZE: %d\n",adjust_data_size);
 	/*TODO how to know if read is done when to return 0 */
 	/*TODO comment below V do i adjust this max for count - begin offset */
-	adjust_data_size = min((count - begin_offset),adjust_data_size);
+	adjust_data_size = min((int)(count - begin_offset),(int)adjust_data_size);
 	printk(KERN_WARNING "A D_SIZE after count-offset compare:%d\n",adjust_data_size);
 
 	
@@ -279,7 +279,7 @@ ssize_t asgn1_read(struct file *filp, char __user *buf, size_t count,
 		printk(KERN_WARNING "SIZE READ = %d\n", size_read);
 		printk(KERN_WARNING "FPOS = %u\n", *f_pos);
 		
-		size_to_be_read = min((PAGE_SIZE - begin_offset),(count-size_read));
+		size_to_be_read = min((int)(PAGE_SIZE - begin_offset),(int)(count-size_read));
 		printk(KERN_WARNING "WANT TO READ = %d\n", size_to_be_read);
 	
 		/*if (asgn1_device.data_size < (*f_pos + size_to_be_read)) {
@@ -465,19 +465,19 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 	printk(KERN_WARNING "IN WRITE\n");
 
-	end_page_no = (*f_pos + count) / PAGE_SIZE;
+	end_page_no = (*f_pos + count -1) / PAGE_SIZE;
 	printk(KERN_WARNING "END PAGE NUMBER = %d\n",end_page_no);
 
 
 	if (end_page_no > 16) {
 		printk(KERN_WARNING "END PAGE NO > 16 -> EXIT FUNCTION\n");
-		return -EINVAL;
+		return -ENOMEM;
 	}
 
 	printk(KERN_WARNING "DEVICE PAGES = %d\n",asgn1_device.num_pages);
 	
 	/*TODO should be less than or equal to */
-	while(asgn1_device.num_pages < end_page_no || asgn1_device.num_pages == 0) {
+	while(asgn1_device.num_pages <= end_page_no) {
 		ce = kmalloc(sizeof(page_node), GFP_KERNEL);
 		/* check for null pointer */
 		if (!(ce)) {
@@ -546,7 +546,7 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 																									size_written,count);
 		}
 		
-		size_to_be_written = min((PAGE_SIZE - begin_offset),(count-size_written));
+		size_to_be_written = min((int)(PAGE_SIZE - begin_offset),(int)(count-size_written));
 
 		if (printk_ratelimit()) {
 			printk(KERN_WARNING "SIZE TO BE WRITTEN: %d bytes\n",
@@ -650,6 +650,10 @@ ssize_t asgn1_write(struct file *filp, const char __user *buf, size_t count,
 
 #define SET_NPROC_OP 1
 #define TEM_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, int) 
+#define GET_DATA_SIZE 2
+#define TEM_GET_DSIZE _IOW(MYIOC_TYPE, GET_DATA_SIZE, size_t)
+#define GET_AVAIL_DATA 3
+#define TEM_AVAIL_DATA _IOW(MYIOC_TYPE, GET_AVAIL_DATA, size_t)
 
 /**
  * The ioctl function, which nothing needs to be done in this case.
@@ -658,7 +662,7 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
   int nr;
   int new_nprocs;
   int result;
-
+	size_t avail;
   /* COMPLETE ME */
   /** 
    * check whether cmd is for our device, if not for us, return -EINVAL 
@@ -667,8 +671,9 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
      set max_nprocs accordingly, don't forget to check validity of the 
      value before setting max_nprocs
    */
-	/*TODO how the fuck to check if it is for the device */
+	/*Check if command is for our device */
 	if (_IOC_TYPE(cmd) != MYIOC_TYPE) {
+		printk(KERN_WARNING "CMD IS NOT FOR OUR DEVICE -> RETURN ERROR\n");
 		return -EINVAL;
 	}	
 
@@ -679,9 +684,7 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 	printk(KERN_WARNING "NR = %d\n",nr);
 	printk(KERN_WARNING "SET_NPROC_OP value = %d\n",SET_NPROC_OP);
 	printk(KERN_WARNING "CMD = %u\n",cmd); 
-	printk(KERN_WARNING "_IOC_TYPE = %d\n",_IOC_TYPE(cmd));
-	printk(KERN_WARNING "major number %d\n",MAJOR(asgn1_device.dev));
-	printk(KERN_WARNING "MINOR NUMBER %d\n",MINOR(asgn1_device.dev));
+	
 	/*TODO is it supposed to switch on nr or cmd?*/
 	switch (nr) {
 
@@ -695,8 +698,9 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 
 			result = copy_from_user((int*) &new_nprocs, arg, sizeof(int));
 			printk(KERN_WARNING "RESULT = %d\n",result);
+			/* TODO result check */
 			printk(KERN_WARNING "new_nprocs = %d\n",new_nprocs);
-			if (new_nprocs < 0) {
+			if (new_nprocs < atomic_read(&asgn1_device.nprocs)) {
 					printk(KERN_WARNING "%d new_nprocs INVALID -> return error\n",new_nprocs);
 					return -EINVAL;
 			}
@@ -707,7 +711,31 @@ long asgn1_ioctl (struct file *filp, unsigned cmd, unsigned long arg) {
 
 			return 0;
 
-		default:
+		case GET_DATA_SIZE:
+
+			printk(KERN_WARNING "CMD = GET_DATA_SIZE");
+			result = copy_to_user(arg, &asgn1_device.data_size, sizeof(size_t));
+			printk(KERN_WARNING "RESULT FROM COPY 2 USER: %d\n",result);
+			/*
+			if result 
+			*/
+			return 0;
+		
+		case GET_AVAIL_DATA:
+
+			printk(KERN_WARNING "CMD = GET_AVAIL_DATA");
+			avail = PAGE_SIZE * 16 - asgn1_device.data_size;
+			printk(KERN_WARNING "AVAIL = %d\n",avail);
+			result = copy_to_user(arg, &avail, sizeof(size_t));
+			printk(KERN_WARNING "RESULT FROM COPY 2 USER: %d\n",result);
+			/*
+				if result 
+			*/
+			return 0;
+
+	
+	
+	default:
 			printk(KERN_WARNING "cmd did not match any of cases -> return error\n");
 			return -EINVAL;
 	}
@@ -730,6 +758,12 @@ int asgn1_read_procmem(char *buf, char **start, off_t offset, int count,
    * use snprintf to print some info to buf, up to size count
    * set eof
    */
+	
+	result = sprintf(buf,"DEVICE DATA SIZE: %d bytes\nNUM PAGES: %d\nMAX PROCS: %d\n",
+										asgn1_device.data_size,
+										asgn1_device.num_pages,
+										atomic_read(&asgn1_device.max_nprocs));
+												
   return result;
 }
 
