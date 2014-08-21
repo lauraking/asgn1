@@ -13,7 +13,10 @@
 #define MYIOC_TYPE 'k'
 #define SET_NPROC_OP 1
 #define ASGN1_SET_NPROC _IOW(MYIOC_TYPE, SET_NPROC_OP, sizeof(int)) 
-
+#define GET_DATA_SIZE 2
+#define ASGN1_GET_DATA_SIZE _IOR(MYIOC_TYPE, GET_DATA_SIZE, sizeof(size_t))
+#define GET_MAJOR 3
+#define ASGN1_GET_MAJOR _IOR(MYIOC_TYPE, GET_MAJOR, sizeof(int))
 
 
 ssize_t my_fread(int fildes, void *buf, size_t nbyte) {
@@ -88,6 +91,8 @@ int main (int argc, char **argv)
     int fd;
     char *buf, *read_buf, *mmap_buf, *filename = "/dev/asgn1";
     int nproc = 12345;
+		size_t d_size;
+		int major;
 
     srandom (getpid ());
 
@@ -154,5 +159,19 @@ int main (int argc, char **argv)
         exit (1);
     }
     printf("nproc set to %d\n", nproc);
-    return 0;
+    
+		if (ioctl(fd, ASGN1_GET_DATA_SIZE, &d_size) < 0) {
+        fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
+        exit (1);
+    }
+		printf("current device data size: %d\n", d_size);
+		
+		if (ioctl(fd, ASGN1_GET_MAJOR, &major) < 0) {
+        fprintf (stderr, "ioctl failed:  %s\n", strerror (errno));
+        exit (1);
+    }
+		printf("current major number: %d\n", major);
+		
+		return 0;
+		 
 }
